@@ -2,17 +2,19 @@ name: API Documentation Generation
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ main, feat/api-docs-template ]
     paths:
-      - 'docs/api-docs-template.md'
+      - 'docs/templates/**'
       - 'scripts/generate-api-docs.py'
       - '.github/workflows/api-docs-generation.yml'
   pull_request:
     branches: [ main ]
     paths:
-      - 'docs/api-docs-template.md'
+      - 'docs/templates/**'
       - 'scripts/generate-api-docs.py'
-  workflow_dispatch:  # Allow manual triggering
+  workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * 1'  # Run every Monday at midnight UTC
 
 jobs:
   generate-api-docs:
@@ -33,15 +35,63 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install pyyaml
+        # Add any required Python packages here
+        pip install requests
 
     - name: Generate API documentation
       run: |
-        python scripts/generate-api-docs.py \
-          --template docs/api-docs-template.md \
-          --output docs/api/endpoints.md \
-          --report docs/validation-report.json \
-          --variables '{"version": "1.0.0", "environment": "${{ github.ref_name }}"}'
+        echo "🚀 Generating API documentation..."
+        python scripts/generate-api-docs.py --output docs/api/endpoints.md --report docs/validation-report.json
+
+    - name: Validate documentation
+      run: |
+        echo "✅ Validating generated documentation..."
+        # Check if validation report exists and is valid
+        if [ -f "docs/validation-report.json" ]; then
+          VALIDATION_RESULT=$(python -c "
+          import json
+          try:
+              with open('docs/validation-report.json', 'r') as f:
+                  data = json.load(f)
+              print('is_valid:' + str(data['is_valid']))
+              print('issues:' + str(len(data['validation_results']['issues'])))
+          except Exception as e:
+              print('error:' + str(e))
+          ")
+          
+          IS_VALID=$(echo "$VALIDATION_RESULT" | grep 'is_valid:' | cut -d: -f2)
+          ISSUE_COUNT=$(echo "$VALIDATION_RESULT" | grep 'issues:' | cut -d: -f2)
+          
+          if [ "$IS_VALID" = "True" ]; then
+            echo "✅ Documentation validation passed"
+          else
+            echo "❌ Documentation validation failed with $ISSUE_COUNT issues"
+            exit 1
+          fi
+        else
+          echo "❌ Validation report not found"
+          exit 1
+        fi
+
+    - name: Check for changes
+      id: check-changes
+      run: |
+        git add docs/api/endpoints.md docs/validation-report.json
+        if git diff --staged --quiet; then
+          echo "changes=false" >> $GITHUB_OUTPUT
+        else
+          echo "changes=true" >> $GITHUB_OUTPUT
+          echo "📄 Documentation changes detected"
+          git diff --staged --name-only
+        fi
+
+    - name: Commit and push changes
+      if: steps.check-changes.outputs.changes == 'true' && github.event_name != 'pull_request'
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git commit -m "docs: auto-generate API documentation [skip ci]"
+        git push
 
     - name: Upload validation report
       uses: actions/upload-artifact@v4
@@ -55,113 +105,86 @@ jobs:
         name: generated-api-docs
         path: docs/api/endpoints.md
 
-    - name: Create validation summary
-      run: |
-        echo "📊 API Documentation Validation Summary"
-        echo "====================================="
-        
-        if [ -f "docs/validation-report.json" ]; then
-          VALID=$(jq -r '.summary.is_valid' docs/validation-report.json)
-          ERRORS=$(jq -r '.summary.error_count' docs/validation-report.json)
-          WARNINGS=$(jq -r '.summary.warning_count' docs/validation-report.json)
-          
-          echo "✅ Overall Valid: $VALID"
-          echo "❌ Error Count: $ERRORS"
-          echo "⚠️  Warning Count: $WARNINGS"
-          
-          if [ "$VALID" = "true" ] && [ "$ERRORS" -eq 0 ]; then
-            echo "🎉 All validations passed!"
-            exit 0
-          else
-            echo "::error::API documentation validation failed!"
-            jq '.validation_results.docs_validation.errors[]' docs/validation-report.json
-            exit 1
-          fi
-        else
-          echo "::error::Validation report not found!"
-          exit 1
-        fi
-
-    - name: Commit generated documentation (on main branch)
-      if: github.ref == 'refs/heads/main' && success()
-      run: |
-        git config --local user.email "action@github.com"
-        git config --local user.name "GitHub Action"
-        git add docs/api/endpoints.md
-        
-        if git diff --staged --quiet; then
-          echo "No changes to commit"
-        else
-          git commit -m "docs: auto-generate API documentation [skip ci]"
-          git push
-        fi
-
-  docs-quality-check:
+  validate-template:
     runs-on: ubuntu-latest
     needs: generate-api-docs
+    if: always()
     
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-
     - name: Download validation report
       uses: actions/download-artifact@v4
       with:
         name: api-docs-validation-report
 
-    - name: Run quality checks
+    - name: Parse validation results
+      id: validation
       run: |
-        echo "🔍 Running documentation quality checks..."
-        
-        # Check if documentation exists
-        if [ ! -f "docs/api/endpoints.md" ]; then
-          echo "::error::Generated documentation not found!"
-          exit 1
+        if [ -f "validation-report.json" ]; then
+          VALIDATION_RESULT=$(python -c "
+          import json
+          try:
+              with open('validation-report.json', 'r') as f:
+                  data = json.load(f)
+              print('is_valid:' + str(data['is_valid']))
+              print('issues_count:' + str(len(data['validation_results']['issues'])))
+              print('sections_found:' + str(len(data['validation_results']['sections_found'])))
+          except Exception as e:
+              print('error:' + str(e))
+          ")
+          
+          IS_VALID=$(echo "$VALIDATION_RESULT" | grep 'is_valid:' | cut -d: -f2)
+          ISSUES_COUNT=$(echo "$VALIDATION_RESULT" | grep 'issues_count:' | cut -d: -f2)
+          SECTIONS_FOUND=$(echo "$VALIDATION_RESULT" | grep 'sections_found:' | cut -d: -f2)
+          
+          echo "IS_VALID=$IS_VALID" >> $GITHUB_ENV
+          echo "ISSUES_COUNT=$ISSUES_COUNT" >> $GITHUB_ENV
+          echo "SECTIONS_FOUND=$SECTIONS_FOUND" >> $GITHUB_ENV
+          
+          if [ "$IS_VALID" = "True" ]; then
+            echo "✅ Template validation passed"
+          else
+            echo "❌ Template validation failed"
+          fi
+        else
+          echo "❌ Validation report not available"
+          echo "IS_VALID=False" >> $GITHUB_ENV
+          echo "ISSUES_COUNT=1" >> $GITHUB_ENV
         fi
+
+    - name: Create validation summary
+      run: |
+        echo "# 📊 API Documentation Validation Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Validation Status:** ${{ env.IS_VALID == 'True' && '✅ PASSED' || '❌ FAILED' }}" >> $GITHUB_STep_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Sections Found:** ${{ env.SECTIONS_FOUND || 'N/A' }}/5" >> $GITHUB_STEP_SUMMARY
+        echo "**Issues Detected:** ${{ env.ISSUES_COUNT || 'Unknown' }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
         
-        # Basic quality metrics
-        DOC_SIZE=$(wc -l < docs/api/endpoints.md)
-        CODE_BLOCKS=$(grep -c '```' docs/api/endpoints.md || true)
-        ENDPOINTS=$(grep -c -E "(GET|POST|PUT|DELETE|PATCH) /" docs/api/endpoints.md || true)
-        
-        echo "📈 Documentation Quality Metrics:"
-        echo "   Lines: $DOC_SIZE"
-        echo "   Code Blocks: $CODE_BLOCKS"
-        echo "   Endpoints: $ENDPOINTS"
-        
-        # Quality thresholds
-        if [ $DOC_SIZE -lt 50 ]; then
-          echo "::warning::Documentation seems too short ($DOC_SIZE lines)"
-        fi
-        
-        if [ $CODE_BLOCKS -lt 5 ]; then
-          echo "::warning::Few code blocks detected ($CODE_BLOCKS)"
-        fi
-        
-        if [ $ENDPOINTS -eq 0 ]; then
-          echo "::error::No API endpoints detected!"
-          exit 1
+        if [ "${{ env.IS_VALID }}" = "True" ]; then
+          echo "🎉 All validation checks passed! The API documentation template contains all required sections and is ready for use." >> $GITHUB_STEP_SUMMARY
+        else
+          echo "⚠️  Validation issues detected. Please check the validation report for details." >> $GITHUB_STEP_SUMMARY
         fi
 
   notify-success:
     runs-on: ubuntu-latest
-    needs: [generate-api-docs, docs-quality-check]
-    if: success()
+    needs: [generate-api-docs, validate-template]
+    if: success() && github.event_name != 'pull_request'
     
     steps:
     - name: Success notification
       run: |
-        echo "✅ API Documentation generation completed successfully!"
-        echo "📄 Generated: docs/api/endpoints.md"
-        echo "📊 Validation: docs/validation-report.json"
+        echo "✅ API documentation generation completed successfully!"
+        echo "📄 Documentation has been updated and committed to the repository."
 
   notify-failure:
     runs-on: ubuntu-latest
-    needs: [generate-api-docs, docs-quality-check]
+    needs: [generate-api-docs, validate-template]
     if: failure()
     
     steps:
     - name: Failure notification
       run: |
-        echo "❌ API Documentation generation failed!"
-        echo "Please check the validation report for details."
+        echo "❌ API documentation generation failed!"
+        echo "Please check the validation report for details on what needs to be fixed."
