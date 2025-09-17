@@ -1,0 +1,167 @@
+name: API Documentation Generation
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'docs/api-docs-template.md'
+      - 'scripts/generate-api-docs.py'
+      - '.github/workflows/api-docs-generation.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'docs/api-docs-template.md'
+      - 'scripts/generate-api-docs.py'
+  workflow_dispatch:  # Allow manual triggering
+
+jobs:
+  generate-api-docs:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+        cache: 'pip'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pyyaml
+
+    - name: Generate API documentation
+      run: |
+        python scripts/generate-api-docs.py \
+          --template docs/api-docs-template.md \
+          --output docs/api/endpoints.md \
+          --report docs/validation-report.json \
+          --variables '{"version": "1.0.0", "environment": "${{ github.ref_name }}"}'
+
+    - name: Upload validation report
+      uses: actions/upload-artifact@v4
+      with:
+        name: api-docs-validation-report
+        path: docs/validation-report.json
+
+    - name: Upload generated documentation
+      uses: actions/upload-artifact@v4
+      with:
+        name: generated-api-docs
+        path: docs/api/endpoints.md
+
+    - name: Create validation summary
+      run: |
+        echo "📊 API Documentation Validation Summary"
+        echo "====================================="
+        
+        if [ -f "docs/validation-report.json" ]; then
+          VALID=$(jq -r '.summary.is_valid' docs/validation-report.json)
+          ERRORS=$(jq -r '.summary.error_count' docs/validation-report.json)
+          WARNINGS=$(jq -r '.summary.warning_count' docs/validation-report.json)
+          
+          echo "✅ Overall Valid: $VALID"
+          echo "❌ Error Count: $ERRORS"
+          echo "⚠️  Warning Count: $WARNINGS"
+          
+          if [ "$VALID" = "true" ] && [ "$ERRORS" -eq 0 ]; then
+            echo "🎉 All validations passed!"
+            exit 0
+          else
+            echo "::error::API documentation validation failed!"
+            jq '.validation_results.docs_validation.errors[]' docs/validation-report.json
+            exit 1
+          fi
+        else
+          echo "::error::Validation report not found!"
+          exit 1
+        fi
+
+    - name: Commit generated documentation (on main branch)
+      if: github.ref == 'refs/heads/main' && success()
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add docs/api/endpoints.md
+        
+        if git diff --staged --quiet; then
+          echo "No changes to commit"
+        else
+          git commit -m "docs: auto-generate API documentation [skip ci]"
+          git push
+        fi
+
+  docs-quality-check:
+    runs-on: ubuntu-latest
+    needs: generate-api-docs
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Download validation report
+      uses: actions/download-artifact@v4
+      with:
+        name: api-docs-validation-report
+
+    - name: Run quality checks
+      run: |
+        echo "🔍 Running documentation quality checks..."
+        
+        # Check if documentation exists
+        if [ ! -f "docs/api/endpoints.md" ]; then
+          echo "::error::Generated documentation not found!"
+          exit 1
+        fi
+        
+        # Basic quality metrics
+        DOC_SIZE=$(wc -l < docs/api/endpoints.md)
+        CODE_BLOCKS=$(grep -c '```' docs/api/endpoints.md || true)
+        ENDPOINTS=$(grep -c -E "(GET|POST|PUT|DELETE|PATCH) /" docs/api/endpoints.md || true)
+        
+        echo "📈 Documentation Quality Metrics:"
+        echo "   Lines: $DOC_SIZE"
+        echo "   Code Blocks: $CODE_BLOCKS"
+        echo "   Endpoints: $ENDPOINTS"
+        
+        # Quality thresholds
+        if [ $DOC_SIZE -lt 50 ]; then
+          echo "::warning::Documentation seems too short ($DOC_SIZE lines)"
+        fi
+        
+        if [ $CODE_BLOCKS -lt 5 ]; then
+          echo "::warning::Few code blocks detected ($CODE_BLOCKS)"
+        fi
+        
+        if [ $ENDPOINTS -eq 0 ]; then
+          echo "::error::No API endpoints detected!"
+          exit 1
+        fi
+
+  notify-success:
+    runs-on: ubuntu-latest
+    needs: [generate-api-docs, docs-quality-check]
+    if: success()
+    
+    steps:
+    - name: Success notification
+      run: |
+        echo "✅ API Documentation generation completed successfully!"
+        echo "📄 Generated: docs/api/endpoints.md"
+        echo "📊 Validation: docs/validation-report.json"
+
+  notify-failure:
+    runs-on: ubuntu-latest
+    needs: [generate-api-docs, docs-quality-check]
+    if: failure()
+    
+    steps:
+    - name: Failure notification
+      run: |
+        echo "❌ API Documentation generation failed!"
+        echo "Please check the validation report for details."
