@@ -1,32 +1,24 @@
 {
-  "timestamp": "2025-09-17T06:04:32.123456",
+  "timestamp": "2025-09-17T06:52:21.123456",
   "validation_results": {
-    "template_validation": {
-      "has_overview": true,
-      "has_authentication": true,
-      "has_endpoints": true,
-      "has_examples": true,
-      "has_error_codes": true,
-      "is_valid_markdown": true
-    },
-    "docs_validation": {
-      "valid": true,
-      "errors": [],
-      "warnings": [],
-      "stats": {
-        "has_main_header": true,
-        "has_code_blocks": true,
-        "has_http_examples": true,
-        "has_json_examples": true,
-        "has_endpoint_definitions": true,
-        "section_count": 8
-      }
-    },
-    "overall_valid": true
+    "has_overview": true,
+    "has_authentication": true,
+    "has_endpoints": true,
+    "has_examples": true,
+    "has_error_codes": true,
+    "sections_found": [
+      "Overview",
+      "Authentication",
+      "Endpoints",
+      "Request/Response Examples",
+      "Error Codes"
+    ],
+    "issues": []
   },
+  "is_valid": true,
   "summary": {
-    "is_valid": true,
-    "error_count": 0,
-    "warning_count": 0
+    "total_sections_found": 5,
+    "total_issues": 0,
+    "required_sections_present": true
   }
 }
