@@ -1,0 +1,32 @@
+{
+  "timestamp": "2025-09-17T06:04:32.123456",
+  "validation_results": {
+    "template_validation": {
+      "has_overview": true,
+      "has_authentication": true,
+      "has_endpoints": true,
+      "has_examples": true,
+      "has_error_codes": true,
+      "is_valid_markdown": true
+    },
+    "docs_validation": {
+      "valid": true,
+      "errors": [],
+      "warnings": [],
+      "stats": {
+        "has_main_header": true,
+        "has_code_blocks": true,
+        "has_http_examples": true,
+        "has_json_examples": true,
+        "has_endpoint_definitions": true,
+        "section_count": 8
+      }
+    },
+    "overall_valid": true
+  },
+  "summary": {
+    "is_valid": true,
+    "error_count": 0,
+    "warning_count": 0
+  }
+}
