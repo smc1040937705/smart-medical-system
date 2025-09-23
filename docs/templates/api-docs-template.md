@@ -1,154 +1,177 @@
-# Smart Medical System API Documentation
+# Smart Medical System API Documentation Template
 
 ## Overview
 
-The Smart Medical System API provides a comprehensive set of endpoints for managing medical data, patient records, appointments, and healthcare operations. This RESTful API follows standard HTTP conventions and returns JSON responses.
+The Smart Medical System API provides a comprehensive set of endpoints for managing medical data, patient records, healthcare providers, and medical appointments. This API follows RESTful principles and uses JSON for data exchange.
 
-**Base URL**: `https://api.smart-medical-system.com/v1`
+### Base URL
+```
+https://api.smart-medical-system.com/v1
+```
+
+### Version
+- Current Version: v1.0.0
+- API Status: Production Ready
 
 ## Authentication
 
-All API requests require authentication using Bearer tokens. Include the token in the Authorization header:
+All API requests require authentication using JWT (JSON Web Tokens). Include the token in the Authorization header.
 
+### Authentication Header
 ```http
-Authorization: Bearer YOUR_ACCESS_TOKEN
+Authorization: Bearer <your_jwt_token>
 ```
 
-### Obtaining an Access Token
+### Obtaining a Token
+```http
+POST /auth/login
+Content-Type: application/json
 
-1. Register your application to get client credentials
-2. Use the OAuth 2.0 authorization flow
-3. Exchange authorization code for access token
+{
+  "username": "your_username",
+  "password": "your_password"
+}
+```
 
 ## Endpoints
 
-### Patients
+### Patient Management
 
 #### Get All Patients
 ```http
 GET /patients
 ```
 
-**Response**: Array of patient objects
-
-#### Get Patient by ID
-```http
-GET /patients/{id}
+**Response:**
+```json
+{
+  "patients": [
+    {
+      "id": "patient_123",
+      "name": "John Doe",
+      "age": 45,
+      "gender": "male",
+      "medical_history": ["hypertension", "diabetes"],
+      "created_at": "2024-01-15T10:30:00Z"
+    }
+  ],
+  "total_count": 1,
+  "page": 1,
+  "per_page": 20
+}
 ```
-
-**Parameters**:
-- `id` (path) - Patient identifier
 
 #### Create Patient
 ```http
 POST /patients
+Content-Type: application/json
+
+{
+  "name": "Jane Smith",
+  "age": 32,
+  "gender": "female",
+  "contact_info": {
+    "email": "jane.smith@email.com",
+    "phone": "+1234567890"
+  },
+  "emergency_contact": {
+    "name": "John Smith",
+    "relationship": "spouse",
+    "phone": "+1234567891"
+  }
+}
 ```
-
-**Request Body**: Patient creation data
-
-### Appointments
-
-#### Get All Appointments
-```http
-GET /appointments
-```
-
-**Query Parameters**:
-- `date` (optional) - Filter by date
-- `status` (optional) - Filter by status
-
-#### Create Appointment
-```http
-POST /appointments
-```
-
-**Request Body**: Appointment creation data
 
 ### Medical Records
 
 #### Get Patient Medical Records
 ```http
-GET /patients/{id}/records
+GET /patients/{patient_id}/records
 ```
 
-#### Add Medical Record
-```http
-POST /patients/{id}/records
+**Parameters:**
+- `patient_id` (string, required): Unique identifier for the patient
+
+**Response:**
+```json
+{
+  "records": [
+    {
+      "id": "record_456",
+      "patient_id": "patient_123",
+      "doctor_id": "doctor_789",
+      "visit_date": "2024-01-20T14:30:00Z",
+      "diagnosis": "Hypertension",
+      "treatment": "Prescribed medication and lifestyle changes",
+      "medications": [
+        {
+          "name": "Lisinopril",
+          "dosage": "10mg",
+          "frequency": "Once daily"
+        }
+      ],
+      "lab_results": [
+        {
+          "test_name": "Blood Pressure",
+          "result": "140/90 mmHg",
+          "normal_range": "<120/80 mmHg"
+        }
+      ]
+    }
+  ]
+}
 ```
 
-### Healthcare Providers
+### Appointment Management
 
-#### Get All Providers
+#### Schedule Appointment
 ```http
-GET /providers
+POST /appointments
+Content-Type: application/json
+
+{
+  "patient_id": "patient_123",
+  "doctor_id": "doctor_789",
+  "appointment_date": "2024-02-01T10:00:00Z",
+  "reason": "Regular checkup",
+  "duration_minutes": 30
+}
 ```
 
-#### Get Provider by ID
+#### Get Available Time Slots
 ```http
-GET /providers/{id}
+GET /doctors/{doctor_id}/availability?date=2024-02-01
 ```
 
 ## Request/Response Examples
 
-### Example: Get Patient by ID
-
-**Request**:
-```http
-GET /patients/12345
-Authorization: Bearer abc123def456
-```
-
-**Response**:
+### Successful Response Format
 ```json
 {
-  "id": 12345,
-  "name": "John Doe",
-  "dateOfBirth": "1985-03-15",
-  "gender": "male",
-  "contact": {
-    "email": "john.doe@example.com",
-    "phone": "+1-555-0123"
+  "success": true,
+  "data": {
+    // Response data here
   },
-  "medicalHistory": [
-    {
-      "condition": "Hypertension",
-      "diagnosisDate": "2020-01-15",
-      "status": "managed"
-    }
-  ],
-  "createdAt": "2023-01-15T10:30:00Z",
-  "updatedAt": "2023-12-01T14:25:00Z"
+  "message": "Operation completed successfully",
+  "timestamp": "2024-01-25T08:30:00Z"
 }
 ```
 
-### Example: Create Appointment
-
-**Request**:
-```http
-POST /appointments
-Authorization: Bearer abc123def456
-Content-Type: application/json
-
-{
-  "patientId": 12345,
-  "providerId": 67890,
-  "appointmentDate": "2024-01-20T14:00:00Z",
-  "reason": "Routine checkup",
-  "duration": 30
-}
-```
-
-**Response**:
+### Error Response Format
 ```json
 {
-  "id": 98765,
-  "patientId": 12345,
-  "providerId": 67890,
-  "appointmentDate": "2024-01-20T14:00:00Z",
-  "reason": "Routine checkup",
-  "duration": 30,
-  "status": "scheduled",
-  "createdAt": "2024-01-15T09:45:00Z"
+  "success": false,
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "message": "Invalid input parameters",
+    "details": [
+      {
+        "field": "email",
+        "message": "Email format is invalid"
+      }
+    ]
+  },
+  "timestamp": "2024-01-25T08:30:00Z"
 }
 ```
 
@@ -161,56 +184,96 @@ Content-Type: application/json
 | 200 | OK - Request successful |
 | 201 | Created - Resource created successfully |
 | 400 | Bad Request - Invalid input parameters |
-| 401 | Unauthorized - Authentication required or invalid |
+| 401 | Unauthorized - Authentication required |
 | 403 | Forbidden - Insufficient permissions |
 | 404 | Not Found - Resource not found |
 | 409 | Conflict - Resource already exists |
-| 429 | Too Many Requests - Rate limit exceeded |
-| 500 | Internal Server Error - Server-side issue |
+| 422 | Unprocessable Entity - Validation error |
+| 500 | Internal Server Error - Server error |
 
-### Error Response Format
+### Application Error Codes
 
+| Code | Description | HTTP Status |
+|------|-------------|-------------|
+| AUTH_REQUIRED | Authentication required | 401 |
+| INVALID_TOKEN | Invalid or expired token | 401 |
+| PERMISSION_DENIED | Insufficient permissions | 403 |
+| PATIENT_NOT_FOUND | Patient not found | 404 |
+| DOCTOR_NOT_FOUND | Doctor not found | 404 |
+| APPOINTMENT_CONFLICT | Appointment time conflict | 409 |
+| VALIDATION_ERROR | Input validation failed | 422 |
+| DATABASE_ERROR | Database operation failed | 500 |
+
+### Rate Limiting
+
+- Maximum requests: 1000 per hour per API key
+- Rate limit headers included in responses:
+  - `X-RateLimit-Limit`: Maximum requests allowed
+  - `X-RateLimit-Remaining`: Remaining requests
+  - `X-RateLimit-Reset`: Time when limit resets
+
+## Data Models
+
+### Patient Model
 ```json
 {
-  "error": {
-    "code": "invalid_input",
-    "message": "Invalid input parameters provided",
-    "details": [
-      {
-        "field": "email",
-        "message": "Invalid email format"
-      }
-    ]
-  }
+  "id": "string",
+  "name": "string",
+  "age": "number",
+  "gender": "string",
+  "contact_info": {
+    "email": "string",
+    "phone": "string",
+    "address": "string"
+  },
+  "emergency_contact": {
+    "name": "string",
+    "relationship": "string",
+    "phone": "string"
+  },
+  "medical_history": "array",
+  "allergies": "array",
+  "created_at": "datetime",
+  "updated_at": "datetime"
 }
 ```
 
-### Common Error Codes
+### Doctor Model
+```json
+{
+  "id": "string",
+  "name": "string",
+  "specialization": "string",
+  "license_number": "string",
+  "contact_info": {
+    "email": "string",
+    "phone": "string",
+    "office_address": "string"
+  },
+  "availability": "array",
+  "created_at": "datetime",
+  "updated_at": "datetime"
+}
+```
 
-- `invalid_token` - Access token is invalid or expired
-- `insufficient_permissions` - User lacks required permissions
-- `resource_not_found` - Requested resource does not exist
-- `validation_error` - Input validation failed
-- `rate_limit_exceeded` - Too many requests in given timeframe
+## Testing
 
-## Rate Limiting
+### Test Environment
+- Base URL: `https://test-api.smart-medical-system.com/v1`
+- Test data is reset daily
+- No rate limiting in test environment
 
-- **Standard**: 1000 requests per hour
-- **Burst**: 100 requests per minute
-- **Headers**:
-  - `X-RateLimit-Limit` - Total requests allowed
-  - `X-RateLimit-Remaining` - Requests remaining
-  - `X-RateLimit-Reset` - Time when limit resets
-
-## Versioning
-
-API version is specified in the URL path. Current version: `v1`
-
-When breaking changes are introduced, a new version will be released with proper deprecation notices.
+### Sample Test Credentials
+```json
+{
+  "username": "test_user",
+  "password": "test_password_123"
+}
+```
 
 ## Support
 
 For API support and questions:
+- Email: api-support@smart-medical-system.com
 - Documentation: https://docs.smart-medical-system.com
-- Support Email: api-support@smart-medical-system.com
-- Issue Tracker: https://github.com/smc1040937705/smart-medical-system/issues
+- Status Page: https://status.smart-medical-system.com
