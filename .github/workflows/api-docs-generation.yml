@@ -2,22 +2,30 @@ name: API Documentation Generation
 
 on:
   push:
-    branches: [ main, feat/api-docs-template ]
+    branches: [ main, develop ]
     paths:
       - 'docs/templates/**'
-      - 'scripts/generate-api-docs.py'
+      - 'scripts/**'
       - '.github/workflows/api-docs-generation.yml'
   pull_request:
     branches: [ main ]
     paths:
       - 'docs/templates/**'
-      - 'scripts/generate-api-docs.py'
+      - 'scripts/**'
   workflow_dispatch:
-  schedule:
-    - cron: '0 0 * * 1'  # Run every Monday at midnight UTC
+    inputs:
+      force_regeneration:
+        description: 'Force regeneration of all documentation'
+        required: false
+        default: 'false'
+        type: boolean
+
+env:
+  PYTHON_VERSION: '3.9'
 
 jobs:
   generate-api-docs:
+    name: Generate API Documentation
     runs-on: ubuntu-latest
     
     steps:
@@ -29,162 +37,217 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
-        python-version: '3.9'
-        cache: 'pip'
+        python-version: ${{ env.PYTHON_VERSION }}
 
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        # Add any required Python packages here
-        pip install requests
+        pip install pyyaml
 
-    - name: Generate API documentation
+    - name: Generate API Documentation
+      id: generate_docs
       run: |
-        echo "🚀 Generating API documentation..."
-        python scripts/generate-api-docs.py --output docs/api/endpoints.md --report docs/validation-report.json
-
-    - name: Validate documentation
-      run: |
-        echo "✅ Validating generated documentation..."
-        # Check if validation report exists and is valid
-        if [ -f "docs/validation-report.json" ]; then
-          VALIDATION_RESULT=$(python -c "
-          import json
-          try:
-              with open('docs/validation-report.json', 'r') as f:
-                  data = json.load(f)
-              print('is_valid:' + str(data['is_valid']))
-              print('issues:' + str(len(data['validation_results']['issues'])))
-          except Exception as e:
-              print('error:' + str(e))
-          ")
-          
-          IS_VALID=$(echo "$VALIDATION_RESULT" | grep 'is_valid:' | cut -d: -f2)
-          ISSUE_COUNT=$(echo "$VALIDATION_RESULT" | grep 'issues:' | cut -d: -f2)
-          
-          if [ "$IS_VALID" = "True" ]; then
-            echo "✅ Documentation validation passed"
-          else
-            echo "❌ Documentation validation failed with $ISSUE_COUNT issues"
-            exit 1
-          fi
+        echo "Starting API documentation generation..."
+        python scripts/generate-api-docs.py --verbose
+        
+        # Check if generation was successful
+        if [ $? -eq 0 ]; then
+          echo "status=success" >> $GITHUB_OUTPUT
+          echo "API documentation generated successfully"
         else
-          echo "❌ Validation report not found"
+          echo "status=failed" >> $GITHUB_OUTPUT
+          echo "API documentation generation failed"
           exit 1
         fi
 
-    - name: Check for changes
-      id: check-changes
+    - name: Validate generated documentation
+      id: validate_docs
       run: |
-        git add docs/api/endpoints.md docs/validation-report.json
-        if git diff --staged --quiet; then
-          echo "changes=false" >> $GITHUB_OUTPUT
+        echo "Validating generated documentation..."
+        
+        # Check if required files exist
+        REQUIRED_FILES=(
+          "docs/api/endpoints.md"
+          "docs/api/error-codes.md"
+          "docs/api/authentication.md"
+          "docs/api/api-specification.json"
+          "docs/validation-report.json"
+        )
+        
+        validation_passed=true
+        missing_files=()
+        
+        for file in "${REQUIRED_FILES[@]}"; do
+          if [ ! -f "$file" ]; then
+            missing_files+=("$file")
+            validation_passed=false
+          fi
+        done
+        
+        # Check validation report
+        if [ -f "docs/validation-report.json" ]; then
+          VALIDATION_STATUS=$(python -c "import json; report = json.load(open('docs/validation-report.json')); print(report.get('status', 'unknown'))")
+          
+          if [ "$VALIDATION_STATUS" != "success" ]; then
+            echo "Validation report indicates failure: $VALIDATION_STATUS"
+            validation_passed=false
+          fi
         else
-          echo "changes=true" >> $GITHUB_OUTPUT
-          echo "📄 Documentation changes detected"
-          git diff --staged --name-only
+          echo "Validation report not found"
+          validation_passed=false
+        fi
+        
+        if [ "$validation_passed" = true ]; then
+          echo "validation_status=success" >> $GITHUB_OUTPUT
+          echo "Documentation validation passed"
+        else
+          echo "validation_status=failed" >> $GITHUB_OUTPUT
+          echo "Documentation validation failed"
+          echo "Missing files: ${missing_files[*]}"
+          exit 1
         fi
 
-    - name: Commit and push changes
-      if: steps.check-changes.outputs.changes == 'true' && github.event_name != 'pull_request'
-      run: |
-        git config --local user.email "action@github.com"
-        git config --local user.name "GitHub Action"
-        git commit -m "docs: auto-generate API documentation [skip ci]"
-        git push
+    - name: Upload generated documentation
+      if: steps.generate_docs.outputs.status == 'success'
+      uses: actions/upload-artifact@v4
+      with:
+        name: api-documentation
+        path: |
+          docs/api/
+          docs/validation-report.json
+        retention-days: 30
 
     - name: Upload validation report
+      if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: api-docs-validation-report
+        name: validation-report
         path: docs/validation-report.json
+        retention-days: 30
 
-    - name: Upload generated documentation
-      uses: actions/upload-artifact@v4
-      with:
-        name: generated-api-docs
-        path: docs/api/endpoints.md
+    - name: Create summary report
+      if: always()
+      run: |
+        echo "# API Documentation Generation Report" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Generation Status:** ${{ steps.generate_docs.outputs.status }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Validation Status:** ${{ steps.validate_docs.outputs.validation_status }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        if [ -f "docs/validation-report.json" ]; then
+          echo "## Validation Details" >> $GITHUB_STEP_SUMMARY
+          echo '```json' >> $GITHUB_STEP_SUMMARY
+          cat docs/validation-report.json >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        if [ "${{ steps.generate_docs.outputs.status }}" = "success" ]; then
+          echo "## Generated Files" >> $GITHUB_STEP_SUMMARY
+          echo "- docs/api/endpoints.md" >> $GITHUB_STEP_SUMMARY
+          echo "- docs/api/error-codes.md" >> $GITHUB_STEP_SUMMARY
+          echo "- docs/api/authentication.md" >> $GITHUB_STEP_SUMMARY
+          echo "- docs/api/api-specification.json" >> $GITHUB_STEP_SUMMARY
+          echo "- docs/validation-report.json" >> $GITHUB_STEP_SUMMARY
+        fi
 
-  validate-template:
+  quality-check:
+    name: Documentation Quality Check
     runs-on: ubuntu-latest
     needs: generate-api-docs
     if: always()
     
     steps:
-    - name: Download validation report
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Download generated documentation
       uses: actions/download-artifact@v4
       with:
-        name: api-docs-validation-report
+        name: api-documentation
 
-    - name: Parse validation results
-      id: validation
+    - name: Run quality checks
       run: |
-        if [ -f "validation-report.json" ]; then
-          VALIDATION_RESULT=$(python -c "
-          import json
-          try:
-              with open('validation-report.json', 'r') as f:
-                  data = json.load(f)
-              print('is_valid:' + str(data['is_valid']))
-              print('issues_count:' + str(len(data['validation_results']['issues'])))
-              print('sections_found:' + str(len(data['validation_results']['sections_found'])))
-          except Exception as e:
-              print('error:' + str(e))
-          ")
-          
-          IS_VALID=$(echo "$VALIDATION_RESULT" | grep 'is_valid:' | cut -d: -f2)
-          ISSUES_COUNT=$(echo "$VALIDATION_RESULT" | grep 'issues_count:' | cut -d: -f2)
-          SECTIONS_FOUND=$(echo "$VALIDATION_RESULT" | grep 'sections_found:' | cut -d: -f2)
-          
-          echo "IS_VALID=$IS_VALID" >> $GITHUB_ENV
-          echo "ISSUES_COUNT=$ISSUES_COUNT" >> $GITHUB_ENV
-          echo "SECTIONS_FOUND=$SECTIONS_FOUND" >> $GITHUB_ENV
-          
-          if [ "$IS_VALID" = "True" ]; then
-            echo "✅ Template validation passed"
-          else
-            echo "❌ Template validation failed"
-          fi
-        else
-          echo "❌ Validation report not available"
-          echo "IS_VALID=False" >> $GITHUB_ENV
-          echo "ISSUES_COUNT=1" >> $GITHUB_ENV
-        fi
-
-    - name: Create validation summary
-      run: |
-        echo "# 📊 API Documentation Validation Summary" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "**Validation Status:** ${{ env.IS_VALID == 'True' && '✅ PASSED' || '❌ FAILED' }}" >> $GITHUB_STep_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "**Sections Found:** ${{ env.SECTIONS_FOUND || 'N/A' }}/5" >> $GITHUB_STEP_SUMMARY
-        echo "**Issues Detected:** ${{ env.ISSUES_COUNT || 'Unknown' }}" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "Running documentation quality checks..."
         
-        if [ "${{ env.IS_VALID }}" = "True" ]; then
-          echo "🎉 All validation checks passed! The API documentation template contains all required sections and is ready for use." >> $GITHUB_STEP_SUMMARY
-        else
-          echo "⚠️  Validation issues detected. Please check the validation report for details." >> $GITHUB_STEP_SUMMARY
+        # Check file sizes
+        echo "Checking file sizes..."
+        MIN_SIZE=100  # bytes
+        
+        for file in docs/api/*.md docs/api/*.json; do
+          if [ -f "$file" ]; then
+            size=$(stat -f%z "$file" 2>/dev/null || stat -c%s "$file" 2>/dev/null)
+            if [ "$size" -lt "$MIN_SIZE" ]; then
+              echo "Warning: $file is too small ($size bytes)"
+            fi
+          fi
+        done
+        
+        # Check for required sections in endpoints.md
+        if [ -f "docs/api/endpoints.md" ]; then
+          echo "Checking endpoints.md structure..."
+          
+          REQUIRED_SECTIONS=(
+            "## Overview"
+            "## Authentication"
+            "## Endpoints"
+            "## Request/Response Examples"
+            "## Error Codes"
+          )
+          
+          content=$(cat docs/api/endpoints.md)
+          
+          for section in "${REQUIRED_SECTIONS[@]}"; do
+            if [[ "$content" != *"$section"* ]]; then
+              echo "Warning: Missing section: $section"
+            fi
+          done
         fi
+        
+        # Validate JSON files
+        if [ -f "docs/api/api-specification.json" ]; then
+          echo "Validating api-specification.json..."
+          python -m json.tool docs/api/api-specification.json > /dev/null
+          if [ $? -eq 0 ]; then
+            echo "✓ api-specification.json is valid JSON"
+          else
+            echo "✗ api-specification.json contains invalid JSON"
+          fi
+        fi
+        
+        if [ -f "docs/validation-report.json" ]; then
+          echo "Validating validation-report.json..."
+          python -m json.tool docs/validation-report.json > /dev/null
+          if [ $? -eq 0 ]; then
+            echo "✓ validation-report.json is valid JSON"
+          else
+            echo "✗ validation-report.json contains invalid JSON"
+          fi
+        fi
+        
+        echo "Quality checks completed"
 
   notify-success:
+    name: Notify Success
     runs-on: ubuntu-latest
-    needs: [generate-api-docs, validate-template]
-    if: success() && github.event_name != 'pull_request'
+    needs: [generate-api-docs, quality-check]
+    if: success()
     
     steps:
     - name: Success notification
       run: |
-        echo "✅ API documentation generation completed successfully!"
-        echo "📄 Documentation has been updated and committed to the repository."
+        echo "API documentation generation completed successfully!"
+        echo "All validation checks passed."
+        echo "Generated files are available in the artifacts."
 
   notify-failure:
+    name: Notify Failure
     runs-on: ubuntu-latest
-    needs: [generate-api-docs, validate-template]
+    needs: [generate-api-docs, quality-check]
     if: failure()
     
     steps:
     - name: Failure notification
       run: |
-        echo "❌ API documentation generation failed!"
-        echo "Please check the validation report for details on what needs to be fixed."
+        echo "API documentation generation failed!"
+        echo "Please check the validation report for details."
+        echo "Artifacts containing error information are available for download."
